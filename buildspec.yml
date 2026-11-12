@@ -1,0 +1,38 @@
+version: 0.2
+
+env:
+  variables:
+    ECR_CUSTOMER_REPOSITORY: "customer-service"
+    ECR_EMPLOYEE_REPOSITORY: "employee-service"
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - export ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+      - export IMAGE_TAG=$(echo ${CODEBUILD_RESOLVED_SOURCE_VERSION} | cut -c 1-7)
+      - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+  build:
+    commands:
+      - echo "Building customer-service image..."
+      - docker build -t ${ECR_REGISTRY}/${ECR_CUSTOMER_REPOSITORY}:${IMAGE_TAG} -t ${ECR_REGISTRY}/${ECR_CUSTOMER_REPOSITORY}:latest ./services/customer-service
+      - echo "Building employee-service image..."
+      - docker build -t ${ECR_REGISTRY}/${ECR_EMPLOYEE_REPOSITORY}:${IMAGE_TAG} -t ${ECR_REGISTRY}/${ECR_EMPLOYEE_REPOSITORY}:latest ./services/employee-service
+
+  post_build:
+    commands:
+      - echo "Pushing customer-service images..."
+      - docker push ${ECR_REGISTRY}/${ECR_CUSTOMER_REPOSITORY}:${IMAGE_TAG}
+      - docker push ${ECR_REGISTRY}/${ECR_CUSTOMER_REPOSITORY}:latest
+      - echo "Pushing employee-service images..."
+      - docker push ${ECR_REGISTRY}/${ECR_EMPLOYEE_REPOSITORY}:${IMAGE_TAG}
+      - docker push ${ECR_REGISTRY}/${ECR_EMPLOYEE_REPOSITORY}:latest
+      - echo "Creating ECS image definitions file..."
+      - printf '[{"name":"customer-service","imageUri":"%s"},{"name":"employee-service","imageUri":"%s"}]' ${ECR_REGISTRY}/${ECR_CUSTOMER_REPOSITORY}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_EMPLOYEE_REPOSITORY}:${IMAGE_TAG} > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
